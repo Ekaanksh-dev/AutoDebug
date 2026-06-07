@@ -62,8 +62,9 @@ REASON: <why this happened>
         ],
         max_tokens=500
     )
-
-    return response.choices[0].message.content
+    
+    msg = response.choices[0].message
+    return msg.content or msg.reasoning_content
 
 
 def parse_analysis(analysis: str) -> dict:

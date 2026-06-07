@@ -92,7 +92,8 @@ ESTIMATED FIX TIME: <5 mins / 15 mins / 1 hour>
         max_tokens=1000
     )
 
-    return response.choices[0].message.content
+    msg = response.choices[0].message
+    return msg.content or msg.reasoning_content
 
 
 def parse_fix_steps(report: str) -> list:

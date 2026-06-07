@@ -62,7 +62,8 @@ EXPLANATION: <what you changed and why>
         max_tokens=800
     )
 
-    return response.choices[0].message.content
+    msg = response.choices[0].message
+    return msg.content or msg.reasoning_content
 
 
 def parse_fix(fix: str) -> dict:
