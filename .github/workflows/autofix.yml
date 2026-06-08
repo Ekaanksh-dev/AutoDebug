@@ -1,0 +1,77 @@
+# AutoDebug — Main Pipeline Workflow
+# Listens for repo_dispatch from watched repos
+# Copyright 2026 Ekaanksh (github.com/Ekaanksh-dev)
+
+name: AutoDebug Pipeline
+
+on:
+  repository_dispatch:
+    types: [analyze]
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "Repo to analyse (owner/name)"
+        required: true
+      commit:
+        description: "Commit SHA"
+        required: true
+      branch:
+        description: "Branch name"
+        required: false
+        default: "main"
+
+jobs:
+  autodebug:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout AutoDebug
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Activate venv & install dependencies
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install -r requirements.txt
+
+      - name: Create .env file
+        run: |
+          cat > .env << EOF
+          ANTHROPIC_BASE_URL=${{ secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_MODEL=${{ secrets.ANTHROPIC_MODEL }}
+          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+          BAND_API_KEY=${{ secrets.BAND_API_KEY }}
+          BAND_ROOM_ID=${{ secrets.BAND_ROOM_ID }}
+          GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
+          GITHUB_TOKEN=${{ secrets.AUTODEBUG_TOKEN }}
+          GITHUB_USERNAME=Ekaanksh-dev
+          AUTODEBUG_REPO=AutoDebug
+          EMAIL_SENDER=${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD=${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECEIVER=${{ secrets.EMAIL_RECEIVER }}
+          DEVOPS_NOTIFIER_REPO=${{ secrets.DEVOPS_NOTIFIER_REPO }}
+          DEBUG_MODE=false
+          MAX_RETRIES=3
+          TIMEOUT_SECONDS=60
+          EOF
+
+      - name: Run AutoDebug pipeline
+        run: |
+          source venv/bin/activate
+          python main.py analyse \
+            --repo "${{ github.event.client_payload.repo || inputs.repo }}" \
+            --commit "${{ github.event.client_payload.commit || inputs.commit }}" \
+            --branch "${{ github.event.client_payload.branch || inputs.branch }}"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: autodebug-logs
+          path: logs/
+          retention-days: 7

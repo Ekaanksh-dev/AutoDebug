@@ -1,0 +1,42 @@
+# AutoDebug — Trigger Workflow
+# Add this file to ANY repo you want AutoDebug to watch
+# Copyright 2026 Ekaanksh (github.com/Ekaanksh-dev)
+
+name: Trigger AutoDebug
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  trigger-autodebug:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger AutoDebug Pipeline
+        run: |
+          curl -X POST \
+          -H "Authorization: token ${{ secrets.AUTODEBUG_TOKEN }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/Ekaanksh-dev/AutoDebug/dispatches \
+          -d '{
+            "event_type": "analyze",
+            "client_payload": {
+              "repo": "${{ github.repository }}",
+              "branch": "${{ github.ref_name }}",
+              "commit": "${{ github.sha }}",
+              "pusher": "${{ github.actor }}",
+              "message": "${{ github.event.head_commit.message }}"
+            }
+          }'
+
+      - name: Log trigger
+        run: |
+          echo "✅ AutoDebug triggered!"
+          echo "Repo    : ${{ github.repository }}"
+          echo "Branch  : ${{ github.ref_name }}"
+          echo "Commit  : ${{ github.sha }}"
+          echo "Pusher  : ${{ github.actor }}"
