@@ -1,0 +1,51 @@
+# AutoDebug — Repo Watcher Workflow
+# Runs every hour to detect new repos and inject trigger
+# Copyright 2026 Ekaanksh (github.com/Ekaanksh-dev)
+
+name: Repo Watcher
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # every hour
+  workflow_dispatch:      # manual trigger anytime
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout AutoDebug
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install -r requirements.txt
+
+      - name: Create .env file
+        run: |
+          cat > .env << EOF
+          GITHUB_TOKEN=${{ secrets.AUTODEBUG_TOKEN }}
+          GITHUB_USERNAME=Ekaanksh-dev
+          AUTODEBUG_REPO=AutoDebug
+          EOF
+
+      - name: Run repo watcher
+        run: |
+          source venv/bin/activate
+          python main.py watch
+
+      - name: Commit updated watched_repos.json
+        run: |
+          git config --global user.email "autodebug@bot.com"
+          git config --global user.name "AutoDebug Bot"
+          git add watched_repos.json
+          git diff --quiet && git diff --staged --quiet || \
+          git commit -m "🤖 AutoDebug: Updated watched repos list"
+          git push
