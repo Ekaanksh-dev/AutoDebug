@@ -16,6 +16,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run and capture Python errors
+        run: |
+          find . -name "*.py" ! -path "./.github/*" -exec python {} \; 2>&1 || true
+
       - name: Trigger AutoDebug Pipeline
         run: |
           curl -X POST \
