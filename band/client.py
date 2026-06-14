@@ -71,7 +71,7 @@ class BandClient:
             console.print(f"[red]❌ Send failed: {e}[/red]")
             return False
 
-    def _receive_local(self, timeout: int = 30) -> dict:
+    def _receive_local(self, timeout: int = 120) -> dict:
         start = time.time()
         while time.time() - start < timeout:
             queue = self._load_queue()
