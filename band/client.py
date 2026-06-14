@@ -26,7 +26,7 @@ class BandClient:
         self.agent_name = agent_name
         self.band_api_key = os.getenv("BAND_API_KEY")
         self.room_id = os.getenv("BAND_ROOM_ID")
-        self.use_band = self.band_api_key and self.band_api_key != "your_band_api_key_here"
+        self.use_band = False
 
         if self.use_band:
             console.print(f"[green]✅ {agent_name} connected to Band API[/green]")

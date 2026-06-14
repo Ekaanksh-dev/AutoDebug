@@ -29,22 +29,16 @@ def trigger_devops_notifier(ctx: BugContext) -> bool:
     payload = {
         "event_type": "bug_found",
         "client_payload": {
-            "repo_name":      ctx.repo_name,
-            "repo_url":       ctx.repo_url,
-            "branch":         ctx.branch,
-            "commit_sha":     ctx.commit_sha,
-            "triggered_at":   ctx.triggered_at,
-            "error_type":     ctx.error_type,
-            "error_message":  ctx.error_message,
-            "bug_file":       ctx.bug_file,
-            "bug_line":       str(ctx.bug_line),
-            "severity":       ctx.severity,
-            "root_cause":     ctx.root_cause,
-            "fix_location":   ctx.fix_location,
-            "fix_report":     ctx.fix_report,
-            "fix_steps":      ctx.fix_steps,
-            "tests_passed":   str(ctx.tests_passed),
-            "bug_confirmed":  str(ctx.bug_confirmed),
+        "repo_name":    ctx.repo_name,
+        "bug_file":     ctx.bug_file,
+        "bug_line":     str(ctx.bug_line),
+        "error_type":   ctx.error_type,
+        "severity":     ctx.severity,
+        "root_cause":   ctx.root_cause,
+        "fix_location": ctx.fix_location,
+        "fix_report":   ctx.fix_report[:500],
+        "triggered_at": ctx.triggered_at,
+        "repo_url":     ctx.repo_url,
         }
     }
 

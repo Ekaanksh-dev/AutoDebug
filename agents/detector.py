@@ -3,8 +3,6 @@
 # Licensed under Apache License 2.0
 
 import os
-import io
-import zipfile
 import subprocess
 import requests
 from pathlib import Path
@@ -56,10 +54,9 @@ def get_failed_run(repo_name: str) -> dict:
 
 
 def get_log_text(repo_name: str, run_id: int) -> str:
-    """Download and extract log ZIP from GitHub Actions"""
+    """Get plain text log from failed job"""
     band.log("Downloading logs...")
 
-    # Step 1 — get jobs to find failed job
     jobs = requests.get(
         f"https://api.github.com/repos/{repo_name}/actions/runs/{run_id}/jobs",
         headers=get_headers()
@@ -75,7 +72,6 @@ def get_log_text(repo_name: str, run_id: int) -> str:
     if not failed_job_id:
         return ""
 
-    # Step 2 — get logs for that specific job (returns plain text!)
     log_response = requests.get(
         f"https://api.github.com/repos/{repo_name}/actions/jobs/{failed_job_id}/logs",
         headers=get_headers(),
@@ -85,7 +81,7 @@ def get_log_text(repo_name: str, run_id: int) -> str:
     return log_response.text[:10000]
 
 
-def extract_bug_from_log(log: str) -> dict:
+def extract_bug_from_log(log: str, clone_path: str = "") -> dict:
     """Parse error from log text"""
     error_types = [
         "SyntaxError", "TypeError", "ValueError", "KeyError",
@@ -101,7 +97,7 @@ def extract_bug_from_log(log: str) -> dict:
 
     lines = log.split("\n")
     for line in lines:
-        # Strip GitHub Actions timestamps (format: 2026-06-12T10:00:00.000Z )
+        # Strip GitHub Actions timestamps
         if "Z " in line:
             line = line.split("Z ", 1)[-1]
 
@@ -114,6 +110,9 @@ def extract_bug_from_log(log: str) -> dict:
             try:
                 parts = line.strip().split(",")
                 bug_file = parts[0].replace("File ", "").strip().strip('"')
+                # Strip clone path to get relative path
+                if clone_path and bug_file.startswith(clone_path):
+                    bug_file = bug_file[len(clone_path):].lstrip("/")
                 bug_line = int(parts[1].replace("line", "").strip())
             except:
                 pass
@@ -127,22 +126,16 @@ def extract_bug_from_log(log: str) -> dict:
 
 
 def fallback_local_scan(clone_path: str) -> dict:
-    """
-    Fallback — if no failed Actions run found,
-    actually execute Python files and catch errors directly.
-    """
+    """Fallback — execute Python files and catch errors directly"""
     band.log("⚡ Fallback: scanning files locally...")
 
     for py_file in sorted(Path(clone_path).rglob("*.py")):
-        # Skip hidden and venv files
         if any(p in str(py_file) for p in [".git", "venv", "__pycache__", ".github"]):
             continue
 
         result = subprocess.run(
             ["python", str(py_file)],
-            capture_output=True,
-            text=True,
-            timeout=10
+            capture_output=True, text=True, timeout=10
         )
 
         if result.returncode != 0 and result.stderr:
@@ -180,6 +173,7 @@ def run(repo_name: str, commit_sha: str, branch: str) -> BugContext:
 
     log_text = ""
     run_url = ""
+    clone_path = f"/tmp/{repo_name.replace('/', '_')}"
 
     # Step 1 — check GitHub Actions for failed run
     failed_run = get_failed_run(repo_name)
@@ -188,6 +182,8 @@ def run(repo_name: str, commit_sha: str, branch: str) -> BugContext:
         log_text = get_log_text(repo_name, failed_run["run_id"])
         run_url = failed_run["run_url"]
         band.log("✅ Got log from GitHub Actions")
+        # Clone repo for code context
+        clone_path = clone_repo(repo_name, commit_sha)
     else:
         # Step 2 — fallback: clone and scan locally
         band.log("No failed Actions run — trying local scan...")
@@ -202,24 +198,19 @@ def run(repo_name: str, commit_sha: str, branch: str) -> BugContext:
         log_text = fallback["log"]
         run_url = fallback["run_url"]
 
-    # Step 3 — clone repo if not already done
-    clone_path = f"/tmp/{repo_name.replace('/', '_')}"
-    if not os.path.exists(clone_path):
-        clone_path = clone_repo(repo_name, commit_sha)
-
-    # Step 4 — extract bug from log
-    bug = extract_bug_from_log(log_text)
+    # Step 3 — extract bug from log
+    bug = extract_bug_from_log(log_text, clone_path)
     ctx.error_type = bug["error_type"]
     ctx.error_message = bug["error_message"]
     ctx.bug_file = bug["bug_file"]
     ctx.bug_line = bug["bug_line"]
     ctx.repo_url = run_url
 
-    # Step 5 — get surrounding code
-    full_path = os.path.join(clone_path, bug["bug_file"].lstrip("/"))
+    # Step 4 — get surrounding code
+    full_path = os.path.join(clone_path, ctx.bug_file)
     ctx.surrounding_code = get_surrounding_code(full_path, ctx.bug_line)
 
-    # Step 6 — read full file
+    # Step 5 — read full file
     try:
         with open(full_path, "r") as f:
             ctx.raw_code = f.read()
@@ -228,7 +219,7 @@ def run(repo_name: str, commit_sha: str, branch: str) -> BugContext:
 
     band.log(f"🐛 Bug detected: {ctx.summary()}")
 
-    # Step 7 — send to Analyser via Band
+    # Step 6 — send to Analyser via Band
     band.send("AnalyserAgent", ctx.to_dict())
 
     return ctx

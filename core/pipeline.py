@@ -22,15 +22,50 @@ def print_banner():
         border_style="green"
     ))
 
-
 def run_pipeline(repo_name: str, commit_sha: str, branch: str) -> BugContext:
-    """
-    Run all 5 agents in sequence.
-    Each agent runs in its own thread — communicates via Band.
-    """
     print_banner()
     console.print(f"\n[bold]🚀 Pipeline started for:[/bold] {repo_name}")
     console.print(f"[dim]Branch: {branch} | Commit: {commit_sha[:7]}[/dim]\n")
+
+    # ── Run agents SEQUENTIALLY not in threads ────────
+    # Detector runs first, passes context directly
+    ctx = detector.run(repo_name, commit_sha, branch)
+
+    if ctx.pipeline_complete:
+        console.print(Panel.fit(
+            "[bold green]✅ No bugs found![/bold green]\n"
+            "All tests passed. Repo looks healthy.",
+            border_style="green",
+            title="AutoDebug Report"
+        ))
+        return ctx
+
+    # Each agent reads from Band queue written by previous
+    ctx = analyser.run()
+    ctx = fixer.run()
+    ctx = tester.run()
+    ctx = resolver.run()
+
+    # ── Pipeline Summary ──────────────────────────────
+    if ctx.bug_confirmed:
+        console.print(Panel.fit(
+            f"[bold red]🐛 Bug Found![/bold red]\n"
+            f"File: {ctx.bug_file}:{ctx.bug_line}\n"
+            f"Type: {ctx.error_type}\n"
+            f"Severity: {ctx.severity.upper()}\n"
+            f"Fix Steps: {len(ctx.fix_steps)}",
+            border_style="red",
+            title="AutoDebug Report"
+        ))
+    else:
+        console.print(Panel.fit(
+            "[bold green]✅ No bugs found![/bold green]\n"
+            "All tests passed. Repo looks healthy.",
+            border_style="green",
+            title="AutoDebug Report"
+        ))
+
+    return ctx
 
     # ── Run agents in threads ─────────────────────────
 

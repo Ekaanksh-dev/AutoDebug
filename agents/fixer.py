@@ -103,7 +103,7 @@ def run() -> BugContext:
     band.log("⏳ Waiting for Analyser...")
 
     # Receive context from Analyser via Band
-    data = band.receive(timeout=60)
+    data = band.receive(timeout=120)
 
     if not data:
         band.log("❌ No data received from Analyser")

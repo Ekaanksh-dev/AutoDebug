@@ -49,30 +49,31 @@ def run_pytest(repo_path: str) -> dict:
         }
 
 
-def confirm_bug_exists(test_output: str, error_type: str) -> bool:
-    """Check if the known bug appears in test output"""
-    indicators = [
-        "FAILED",
-        "ERROR",
-        "error",
-        error_type,
-        "AssertionError",
-        "Exception"
-    ]
-
+def confirm_bug_exists(test_output: str, error_type: str, clone_path: str, bug_file: str) -> bool:
+    """Check pytest output OR directly run the buggy file"""
+    indicators = ["FAILED", "ERROR", "error", error_type, "AssertionError", "Exception"]
     for indicator in indicators:
         if indicator in test_output:
             return True
 
-    return False
+    # No tests found — run the actual buggy file directly
+    full_path = os.path.join(clone_path, bug_file.lstrip("/"))
+    if os.path.exists(full_path):
+        result = subprocess.run(
+            ["python", full_path],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode != 0 and error_type in result.stderr:
+            return True
 
+    return False
 
 def run() -> BugContext:
     """Main tester function"""
     band.log("⏳ Waiting for Fixer...")
 
     # Receive context from Fixer via Band
-    data = band.receive(timeout=60)
+    data = band.receive(timeout=120)
 
     if not data:
         band.log("❌ No data received from Fixer")
@@ -92,9 +93,12 @@ def run() -> BugContext:
     # Update context
     ctx.tests_passed = test_result["passed"]
     ctx.test_output = test_result["output"]
+    repo_path = f"/tmp/{ctx.repo_name.replace('/', '_')}"
     ctx.bug_confirmed = confirm_bug_exists(
         test_result["output"],
-        ctx.error_type
+        ctx.error_type,
+        repo_path,
+        ctx.bug_file
     )
 
     if ctx.bug_confirmed:
