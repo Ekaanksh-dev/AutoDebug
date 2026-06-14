@@ -3,8 +3,11 @@
 # Licensed under Apache License 2.0
 
 import os
+import io
+import zipfile
 import subprocess
 import requests
+from pathlib import Path
 from dotenv import load_dotenv
 from core.context import BugContext
 from band.client import BandClient
@@ -14,66 +17,81 @@ load_dotenv()
 band = BandClient("DetectorAgent")
 
 
+def get_headers() -> dict:
+    return {
+        "Authorization": f"token {os.getenv('GITHUB_TOKEN')}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+
 def clone_repo(repo_name: str, commit_sha: str) -> str:
-    """Clone the triggered repo locally"""
     token = os.getenv("GITHUB_TOKEN")
     clone_url = f"https://{token}@github.com/{repo_name}.git"
     clone_path = f"/tmp/{repo_name.replace('/', '_')}"
-
-    # Remove if already exists
     subprocess.run(["rm", "-rf", clone_path])
-
     band.log(f"Cloning {repo_name}...")
     subprocess.run(["git", "clone", clone_url, clone_path], capture_output=True)
-
-    # Checkout specific commit
-    subprocess.run(
-        ["git", "checkout", commit_sha],
-        cwd=clone_path,
-        capture_output=True
-    )
-
+    subprocess.run(["git", "checkout", commit_sha], cwd=clone_path, capture_output=True)
     band.log(f"✅ Cloned to {clone_path}")
     return clone_path
 
 
-def get_error_from_actions(repo_name: str) -> dict:
-    """Fetch latest failed GitHub Actions log"""
-    token = os.getenv("GITHUB_TOKEN")
-    headers = {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json"
-    }
+def get_failed_run(repo_name: str) -> dict:
+    """Find the latest failed GitHub Actions run"""
+    runs = requests.get(
+        f"https://api.github.com/repos/{repo_name}/actions/runs?per_page=10",
+        headers=get_headers()
+    ).json()
 
-    # Get latest workflow runs
-    runs_url = f"https://api.github.com/repos/{repo_name}/actions/runs"
-    runs = requests.get(runs_url, headers=headers).json()
-
-    # Find latest failed run
     for run in runs.get("workflow_runs", []):
         if run["conclusion"] == "failure":
             band.log(f"Found failed run: {run['id']}")
-
-            # Get logs URL
-            logs_url = f"https://api.github.com/repos/{repo_name}/actions/runs/{run['id']}/logs"
-            logs_response = requests.get(logs_url, headers=headers)
-
             return {
-                "error_found": True,
+                "found": True,
                 "run_id": run["id"],
-                "run_url": run["html_url"],
-                "log": logs_response.text[:3000]  # first 3000 chars
+                "run_url": run["html_url"]
             }
 
-    return {"error_found": False}
+    return {"found": False}
+
+
+def get_log_text(repo_name: str, run_id: int) -> str:
+    """Download and extract log ZIP from GitHub Actions"""
+    band.log("Downloading logs...")
+
+    # Step 1 — get jobs to find failed job
+    jobs = requests.get(
+        f"https://api.github.com/repos/{repo_name}/actions/runs/{run_id}/jobs",
+        headers=get_headers()
+    ).json()
+
+    failed_job_id = None
+    for job in jobs.get("jobs", []):
+        if job["conclusion"] == "failure":
+            failed_job_id = job["id"]
+            band.log(f"Failed job: {job['name']} (id: {job['id']})")
+            break
+
+    if not failed_job_id:
+        return ""
+
+    # Step 2 — get logs for that specific job (returns plain text!)
+    log_response = requests.get(
+        f"https://api.github.com/repos/{repo_name}/actions/jobs/{failed_job_id}/logs",
+        headers=get_headers(),
+        allow_redirects=True
+    )
+
+    return log_response.text[:10000]
 
 
 def extract_bug_from_log(log: str) -> dict:
-    """Parse error type and message from log"""
+    """Parse error from log text"""
     error_types = [
         "SyntaxError", "TypeError", "ValueError", "KeyError",
         "AttributeError", "ImportError", "IndexError", "NameError",
-        "ZeroDivisionError", "FileNotFoundError", "RuntimeError"
+        "ZeroDivisionError", "FileNotFoundError", "RuntimeError",
+        "AssertionError", "ModuleNotFoundError", "PermissionError"
     ]
 
     error_type = "UnknownError"
@@ -81,14 +99,17 @@ def extract_bug_from_log(log: str) -> dict:
     bug_file = ""
     bug_line = 0
 
-    for line in log.split("\n"):
-        # Find error type
+    lines = log.split("\n")
+    for line in lines:
+        # Strip GitHub Actions timestamps (format: 2026-06-12T10:00:00.000Z )
+        if "Z " in line:
+            line = line.split("Z ", 1)[-1]
+
         for et in error_types:
             if et in line:
                 error_type = et
                 error_message = line.strip()
 
-        # Find file and line number
         if "File " in line and ", line " in line:
             try:
                 parts = line.strip().split(",")
@@ -105,25 +126,48 @@ def extract_bug_from_log(log: str) -> dict:
     }
 
 
+def fallback_local_scan(clone_path: str) -> dict:
+    """
+    Fallback — if no failed Actions run found,
+    actually execute Python files and catch errors directly.
+    """
+    band.log("⚡ Fallback: scanning files locally...")
+
+    for py_file in sorted(Path(clone_path).rglob("*.py")):
+        # Skip hidden and venv files
+        if any(p in str(py_file) for p in [".git", "venv", "__pycache__", ".github"]):
+            continue
+
+        result = subprocess.run(
+            ["python", str(py_file)],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode != 0 and result.stderr:
+            band.log(f"🐛 Error found in {py_file.name}")
+            return {
+                "found": True,
+                "log": result.stderr,
+                "run_url": f"file://{py_file}"
+            }
+
+    return {"found": False}
+
+
 def get_surrounding_code(file_path: str, line: int, window: int = 10) -> str:
-    """Get code around the bug line"""
     try:
         with open(file_path, "r") as f:
             lines = f.readlines()
-
         start = max(0, line - window)
         end = min(len(lines), line + window)
-        snippet = lines[start:end]
-
-        return "".join(
-            f"{start + i + 1}: {l}" for i, l in enumerate(snippet)
-        )
+        return "".join(f"{start + i + 1}: {l}" for i, l in enumerate(lines[start:end]))
     except:
         return ""
 
 
 def run(repo_name: str, commit_sha: str, branch: str) -> BugContext:
-    """Main detector function — entry point of pipeline"""
     band.log(f"🔍 Starting detection on {repo_name}")
 
     ctx = BugContext(
@@ -134,29 +178,48 @@ def run(repo_name: str, commit_sha: str, branch: str) -> BugContext:
         current_agent="DetectorAgent"
     )
 
-    # Step 1 — Get error from GitHub Actions
-    error_data = get_error_from_actions(repo_name)
+    log_text = ""
+    run_url = ""
 
-    if not error_data["error_found"]:
-        band.log("✅ No errors found in latest run")
-        ctx.pipeline_complete = True
-        return ctx
+    # Step 1 — check GitHub Actions for failed run
+    failed_run = get_failed_run(repo_name)
 
-    # Step 2 — Clone repo
-    clone_path = clone_repo(repo_name, commit_sha)
+    if failed_run["found"]:
+        log_text = get_log_text(repo_name, failed_run["run_id"])
+        run_url = failed_run["run_url"]
+        band.log("✅ Got log from GitHub Actions")
+    else:
+        # Step 2 — fallback: clone and scan locally
+        band.log("No failed Actions run — trying local scan...")
+        clone_path = clone_repo(repo_name, commit_sha)
+        fallback = fallback_local_scan(clone_path)
 
-    # Step 3 — Extract bug details from log
-    bug = extract_bug_from_log(error_data["log"])
+        if not fallback["found"]:
+            band.log("✅ No errors found anywhere")
+            ctx.pipeline_complete = True
+            return ctx
+
+        log_text = fallback["log"]
+        run_url = fallback["run_url"]
+
+    # Step 3 — clone repo if not already done
+    clone_path = f"/tmp/{repo_name.replace('/', '_')}"
+    if not os.path.exists(clone_path):
+        clone_path = clone_repo(repo_name, commit_sha)
+
+    # Step 4 — extract bug from log
+    bug = extract_bug_from_log(log_text)
     ctx.error_type = bug["error_type"]
     ctx.error_message = bug["error_message"]
     ctx.bug_file = bug["bug_file"]
     ctx.bug_line = bug["bug_line"]
+    ctx.repo_url = run_url
 
-    # Step 4 — Get surrounding code
+    # Step 5 — get surrounding code
     full_path = os.path.join(clone_path, bug["bug_file"].lstrip("/"))
-    ctx.surrounding_code = get_surrounding_code(full_path, bug["bug_line"])
+    ctx.surrounding_code = get_surrounding_code(full_path, ctx.bug_line)
 
-    # Step 5 — Read full file
+    # Step 6 — read full file
     try:
         with open(full_path, "r") as f:
             ctx.raw_code = f.read()
@@ -165,7 +228,7 @@ def run(repo_name: str, commit_sha: str, branch: str) -> BugContext:
 
     band.log(f"🐛 Bug detected: {ctx.summary()}")
 
-    # Step 6 — Send to Analyser via Band
+    # Step 7 — send to Analyser via Band
     band.send("AnalyserAgent", ctx.to_dict())
 
     return ctx
