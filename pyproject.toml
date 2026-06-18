@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autodebug"
+version = "0.1.0"
+description = "AI-powered multi-agent bug fixing system"
+requires-python = ">=3.10"
+
+[project.scripts]
+autodebug = "autodebug.cli:main"
+
+[tool.setuptools]
+packages = ["autodebug"]

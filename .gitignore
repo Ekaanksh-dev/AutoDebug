@@ -47,3 +47,18 @@ coverage.xml
 *.pem
 *.key
 secrets.json
+agent_config.yaml
+
+# AutoDebug secrets
+agent_config.yaml
+*.save
+
+# Runtime files
+.band_queue.json
+
+# Local repositories
+/tmp/
+
+# Python caches
+__pycache__/
+*.pyc

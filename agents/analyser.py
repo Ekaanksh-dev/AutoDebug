@@ -6,7 +6,7 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 from core.context import BugContext
-from band.client import BandClient
+from band_local.client import BandClient
 
 load_dotenv()
 
