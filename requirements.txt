@@ -9,12 +9,13 @@ httpx>=0.25.0
 
 # Environment
 python-dotenv>=1.0.0
+pyyaml>=6.0
+
+# Band SDK
+band-sdk==1.0.0
 
 # GitHub
 PyGithub>=2.1.1
-
-# Email
-secure-smtplib
 
 # Testing
 pytest>=7.4.0
