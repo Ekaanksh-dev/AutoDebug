@@ -70,3 +70,14 @@ Resolved. `send_email()` and `trigger_devops_notifier()` both fire successfully 
 
 ## 14. Repo cleanup
 Excluded from git via `.gitignore`: `venv/`, `.env`, `agent_config.yaml`, `logs/*.log`, `__pycache__/`.
+
+## Fallback Mode
+
+`band_local/` contains a local JSON queue implementation that acts as a 
+drop-in replacement for Band when:
+- Band API key is unavailable or rate-limited  
+- Running locally without internet access
+- Development and testing without Band credentials
+
+To use fallback mode, set `use_band = False` in `band_local/client.py`.
+The pipeline logic remains identical — only the message transport changes.
