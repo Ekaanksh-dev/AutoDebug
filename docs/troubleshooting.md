@@ -71,7 +71,7 @@ Resolved. `send_email()` and `trigger_devops_notifier()` both fire successfully 
 ## 14. Repo cleanup
 Excluded from git via `.gitignore`: `venv/`, `.env`, `agent_config.yaml`, `logs/*.log`, `__pycache__/`.
 
-## Fallback Mode
+## 15. Fallback Mode
 
 `band_local/` contains a local JSON queue implementation that acts as a 
 drop-in replacement for Band when:
